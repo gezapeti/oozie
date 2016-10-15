@@ -19,6 +19,7 @@ package org.apache.oozie.action.hadoop;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.yarn.api.records.FinalApplicationStatus;
+import org.apache.oozie.action.hadoop.LauncherAM.OozieActionResult;
 
 import java.io.IOException;
 import java.net.HttpURLConnection;
@@ -36,7 +37,8 @@ import java.util.EnumSet;
 public class LauncherAMCallbackNotifier {
     private static final String OOZIE_LAUNCHER_CALLBACK = "oozie.launcher.callback.";
     private static final int OOZIE_LAUNCHER_CALLBACK_RETRY_INTERVAL_MAX = 5000;
-    private static final EnumSet<FinalApplicationStatus> FAILED_APPLICATION_STATES = EnumSet.of(FinalApplicationStatus.KILLED, FinalApplicationStatus.FAILED);
+    private static final EnumSet<FinalApplicationStatus> FAILED_APPLICATION_STATES = EnumSet.of(
+            FinalApplicationStatus.KILLED, FinalApplicationStatus.FAILED);
 
     public static final String OOZIE_LAUNCHER_CALLBACK_RETRY_ATTEMPTS = OOZIE_LAUNCHER_CALLBACK + "retry.attempts";
     public static final String OOZIE_LAUNCHER_CALLBACK_RETRY_INTERVAL = OOZIE_LAUNCHER_CALLBACK + "retry.interval";
@@ -136,11 +138,11 @@ public class LauncherAMCallbackNotifier {
 
     /**
      * Notify a server of the completion of a submitted job.
-     * @param finalStatus The Application Status
+     * @param submissionResult The Application Status
      *
      * @throws InterruptedException
      */
-    public void notifyURL(FinalApplicationStatus finalStatus, boolean backgroundAction) throws InterruptedException {
+    public void notifyURL(OozieActionResult submissionResult) throws InterruptedException {
         // Do we need job-end notification?
         if (userUrl == null) {
             System.out.println("Callback notification URL not set, skipping.");
@@ -149,12 +151,7 @@ public class LauncherAMCallbackNotifier {
 
         //Do string replacements for final status
         if (userUrl.contains(OOZIE_LAUNCHER_CALLBACK_JOBSTATUS_TOKEN)) {
-            // only send back "RUNNING" if the submission was successful
-            if (backgroundAction && !FAILED_APPLICATION_STATES.contains(finalStatus)) {
-                userUrl = userUrl.replace(OOZIE_LAUNCHER_CALLBACK_JOBSTATUS_TOKEN, "RUNNING");
-            } else {
-                userUrl = userUrl.replace(OOZIE_LAUNCHER_CALLBACK_JOBSTATUS_TOKEN, finalStatus.toString());
-            }
+            userUrl = userUrl.replace(OOZIE_LAUNCHER_CALLBACK_JOBSTATUS_TOKEN, submissionResult.toString());
         }
 
         // Create the URL, ensure sanity
