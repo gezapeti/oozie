@@ -151,6 +151,13 @@ public class WritableUtils {
         }
     }
 
+    /**
+     * Write string list.
+     *
+     * @param dataOutput the data output
+     * @param list the list
+     * @throws IOException Signals that an I/O exception has occurred.
+     */
     public static void writeStringList(DataOutput dataOutput, List<String> list) throws IOException {
         dataOutput.writeInt(list.size());
         for (String str : list) {
@@ -171,6 +178,21 @@ public class WritableUtils {
         for (Entry<String, T> t : map.entrySet()) {
             writeStringAsBytes(dataOutput, t.getKey());
             t.getValue().write(dataOutput);
+        }
+    }
+
+    /**
+     * Write <String, String> map.
+     *
+     * @param dataOutput the data output
+     * @param map the map
+     * @throws IOException Signals that an I/O exception has occurred.
+     */
+    public static void writeStringMap(DataOutput dataOutput, Map<String, String> map) throws IOException {
+        dataOutput.writeInt(map.size());
+        for (Entry<String, String> t : map.entrySet()) {
+            writeStringAsBytes(dataOutput, t.getKey());
+            writeStringAsBytes(dataOutput, t.getValue());
         }
     }
 
@@ -207,6 +229,25 @@ public class WritableUtils {
             String key = readBytesAsString(dataInput);
             T value = (T) ReflectionUtils.newInstance(clazz, null);
             value.readFields(dataInput);
+            map.put(key, value);
+        }
+        return map;
+    }
+
+    /**
+     * Read <String, String> map.
+     *
+     * @param dataInput the data input
+     * @param clazz the clazz
+     * @return the map
+     * @throws IOException Signals that an I/O exception has occurred.
+     */
+    public static Map<String, String> readStringMap(DataInput dataInput) throws IOException {
+        Map<String, String> map = new HashMap<String, String>();
+        int count = dataInput.readInt();
+        for (int i = 0; i < count; i++) {
+            String key = readBytesAsString(dataInput);
+            String value = readBytesAsString(dataInput);
             map.put(key, value);
         }
         return map;
