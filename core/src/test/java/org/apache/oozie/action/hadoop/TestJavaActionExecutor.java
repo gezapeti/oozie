@@ -307,6 +307,14 @@ public class TestJavaActionExecutor extends ActionExecutorTestCase {
     }
 
     protected Context createContext(String actionXml, String group) throws Exception {
+        return createContextDefault(actionXml, group, false);
+    }
+
+    protected Context createContextWithLauncher(String actionXml, String group) throws Exception {
+        return createContextDefault(actionXml, group, true);
+    }
+
+    protected Context createContextDefault(String actionXml, String group, boolean withLauncher) throws Exception {
         JavaActionExecutor ae = new JavaActionExecutor();
 
         Path appJarPath = new Path("lib/test.jar");
@@ -322,7 +330,13 @@ public class TestJavaActionExecutor extends ActionExecutorTestCase {
         protoConf.set(WorkflowAppService.HADOOP_USER, getTestUser());
         protoConf.setStrings(WorkflowAppService.APP_LIB_PATH_LIST, appJarPath.toString(), appSoPath.toString());
 
-        WorkflowJobBean wf = createBaseWorkflow(protoConf, "action");
+        WorkflowJobBean wf;
+        if (withLauncher) {
+            wf = createBaseWorkflowWithLauncherConfig(protoConf, "action");
+        } else {
+            wf = createBaseWorkflow(protoConf, "action");
+        }
+
         if(group != null) {
             wf.setGroup(group);
         }
@@ -2295,6 +2309,24 @@ public class TestJavaActionExecutor extends ActionExecutorTestCase {
         conf.set(oozieActionHiveRootLogger, "DEBUG");
         hae.setRootLoggerLevel(conf);
         assertEquals("DEBUG", conf.get(oozieActionHiveRootLogger));
+    }
+
+    public void testExecutionWithLauncher() throws Exception {
+        String actionXml = "<java>" +
+                "<job-tracker>" + getJobTrackerUri() + "</job-tracker>" +
+                "<name-node>" + getNameNodeUri() + "</name-node>" +
+                "<main-class>" + LauncherMainTester.class.getName() + "</main-class>" +
+                "</java>";
+        Context context = createContextWithLauncher(actionXml, null);
+        submitAction(context);
+        waitUntilYarnAppDoneAndAssertSuccess(context.getAction().getExternalId());
+        ActionExecutor ae = new JavaActionExecutor();
+        ae.check(context, context.getAction());
+        assertEquals("SUCCEEDED", context.getAction().getExternalStatus());
+        assertNull(context.getAction().getData());
+
+        ae.end(context, context.getAction());
+        assertEquals(WorkflowAction.Status.OK, context.getAction().getStatus());
     }
 
 }

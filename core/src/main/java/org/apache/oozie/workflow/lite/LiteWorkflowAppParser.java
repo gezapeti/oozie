@@ -74,6 +74,13 @@ import com.google.common.base.Preconditions;
  */
 public class LiteWorkflowAppParser {
 
+    private static final String LAUNCHER_E = "launcher";
+    private static final String LAUNCHER_MEMORY = "memory";
+    private static final String LAUNCHER_VCORES = "vcores";
+    private static final String LAUNCHER_JAVAOPTS = "java-opts";
+    private static final String LAUNCHER_ENV = "env";
+    private static final String LAUNCHER_SHARELIB = "sharelib";
+    private static final String LAUNCHER_QUEUE = "queue";
     private static final String DECISION_E = "decision";
     private static final String ACTION_E = "action";
     private static final String END_E = "end";
@@ -461,7 +468,7 @@ public class LiteWorkflowAppParser {
             // Define an empty launcher config with some default values
             LauncherConfig launcherConfig = LauncherConfig.DEFAULT_LAUNCHER_CONFIG;
 
-            Element globalLauncherElement = global.getChild("launcher", ns);
+            Element globalLauncherElement = global.getChild(LAUNCHER_E, ns);
             if (globalLauncherElement != null) {
                 launcherConfig = getLauncherConfig(globalLauncherElement);
             }
@@ -512,8 +519,7 @@ public class LiteWorkflowAppParser {
             }
         }
 
-        if (actionElement.getChild("launcher") == null && gData.launcherConfig != null) {
-           // addChildElement(actionElement, actionNs, "launcher", gData.launcherConfig);
+        if (actionElement.getChild(LAUNCHER_E) == null && gData.launcherConfig != null) {
             addLauncherConfigToAction(gData.launcherConfig, actionElement);
         }
 
@@ -576,38 +582,38 @@ public class LiteWorkflowAppParser {
 
     private void addLauncherConfigToAction(LauncherConfig launcherConfig, Element actionElement) {
         Namespace ns = actionElement.getNamespace();
-        Element child = new Element("launcher", ns);
+        Element child = new Element(LAUNCHER_E, ns);
         actionElement.addContent(child);
 
-        Element launcherElement = actionElement.getChild("launcher");
+        Element launcherElement = actionElement.getChild(LAUNCHER_E);
 
-        addChildElement(launcherElement, ns, "vcores", String.valueOf(launcherConfig.getVcores()));
-        addChildElement(launcherElement, ns, "memory", String.valueOf(launcherConfig.getMemory()));
-        addChildElement(launcherElement, ns, "java-opts", launcherConfig.getJavaOpts());
-        addChildElement(launcherElement, ns, "sharelib", Joiner.on(",").join(launcherConfig.getSharelibs()));
-        addChildElement(launcherElement, ns, "env", Joiner.on("=").withKeyValueSeparator(":").join(launcherConfig.getEnv()));
-        addChildElement(launcherElement, ns, "queue", launcherConfig.getQueue());
+        addChildElement(launcherElement, ns, LAUNCHER_VCORES, String.valueOf(launcherConfig.getVcores()));
+        addChildElement(launcherElement, ns, LAUNCHER_MEMORY, String.valueOf(launcherConfig.getMemory()));
+        addChildElement(launcherElement, ns, LAUNCHER_JAVAOPTS, launcherConfig.getJavaOpts());
+        addChildElement(launcherElement, ns, LAUNCHER_SHARELIB, Joiner.on(",").join(launcherConfig.getSharelibs()));
+        addChildElement(launcherElement, ns, LAUNCHER_ENV, Joiner.on("=").withKeyValueSeparator(":").join(launcherConfig.getEnv()));
+        addChildElement(launcherElement, ns, LAUNCHER_QUEUE, launcherConfig.getQueue());
     }
 
     private LauncherConfig getLauncherConfig(Element globalLauncherElement) {
         int memory = LauncherConfig.DEFAULT_MEMORY;
-        if (globalLauncherElement.getChild("memory") != null) {
-            memory = Integer.parseInt(globalLauncherElement.getChild("memory").getText());
+        if (globalLauncherElement.getChild(LAUNCHER_MEMORY) != null) {
+            memory = Integer.parseInt(globalLauncherElement.getChild(LAUNCHER_MEMORY).getText());
         }
 
         int vcores = LauncherConfig.DEFAULT_VCORES;
-        if (globalLauncherElement.getChild("vcores") != null) {
-            vcores = Integer.parseInt(globalLauncherElement.getChild("vcores").getText());
+        if (globalLauncherElement.getChild(LAUNCHER_VCORES) != null) {
+            vcores = Integer.parseInt(globalLauncherElement.getChild(LAUNCHER_VCORES).getText());
         }
 
         String javaOpts = null;
-        if (globalLauncherElement.getChild("java-opts") != null) {
-            javaOpts = globalLauncherElement.getChild("java-opts").getText();
+        if (globalLauncherElement.getChild(LAUNCHER_JAVAOPTS) != null) {
+            javaOpts = globalLauncherElement.getChild(LAUNCHER_JAVAOPTS).getText();
         }
 
         Map<String, String> env = Collections.emptyMap();
-        if (globalLauncherElement.getChild("env") != null) {
-            String envString = globalLauncherElement.getChild("env").getText();
+        if (globalLauncherElement.getChild(LAUNCHER_ENV) != null) {
+            String envString = globalLauncherElement.getChild(LAUNCHER_ENV).getText();
 
             env = new HashMap<>();
 
@@ -619,13 +625,13 @@ public class LiteWorkflowAppParser {
         }
 
         String queue = null;
-        if (globalLauncherElement.getChild("queue") != null) {
-            queue = globalLauncherElement.getChild("queue").getText();
+        if (globalLauncherElement.getChild(LAUNCHER_QUEUE) != null) {
+            queue = globalLauncherElement.getChild(LAUNCHER_QUEUE).getText();
         }
 
         List<String> shareLibs = Collections.emptyList();
-        if (globalLauncherElement.getChild("sharelib") != null) {
-            String sharelibString = globalLauncherElement.getChild("sharelib").getText();
+        if (globalLauncherElement.getChild(LAUNCHER_SHARELIB) != null) {
+            String sharelibString = globalLauncherElement.getChild(LAUNCHER_SHARELIB).getText();
 
             for (final String sharelib : sharelibString.split(",")) {
                 shareLibs.add(sharelib);

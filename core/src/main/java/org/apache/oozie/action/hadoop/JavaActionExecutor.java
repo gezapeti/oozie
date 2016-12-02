@@ -100,6 +100,7 @@ import org.jdom.JDOMException;
 import org.jdom.Namespace;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.io.Closeables;
 
 
@@ -237,6 +238,7 @@ public class JavaActionExecutor extends ActionExecutor {
         Namespace ns = actionXml.getNamespace();
         String jobTracker = actionXml.getChild("job-tracker", ns).getTextTrim();
         String nameNode = actionXml.getChild("name-node", ns).getTextTrim();
+
         JobConf conf = null;
         if (loadResources) {
             conf = Services.get().get(HadoopAccessorService.class).createJobConf(jobTracker);
@@ -913,7 +915,6 @@ public class JavaActionExecutor extends ActionExecutor {
     }
 
     public void submitLauncher(FileSystem actionFs, final Context context, WorkflowAction action) throws ActionExecutorException {
-        boolean exception = false;
         YarnClient yarnClient = null;
         try {
             Path appPathRoot = new Path(context.getWorkflow().getAppPath());
@@ -924,6 +925,7 @@ public class JavaActionExecutor extends ActionExecutor {
             }
 
             Element actionXml = XmlUtils.parseXml(action.getConf());
+            LOG.info("ActionXML: {0}", action.getConf());
 
             // action job configuration
             Configuration actionConf = loadHadoopDefaultResources(context, actionXml);
@@ -1045,7 +1047,6 @@ public class JavaActionExecutor extends ActionExecutor {
             context.setStartData(launcherId, jobTracker, consoleUrl);
         }
         catch (Exception ex) {
-            exception = true;
             throw convertException(ex);
         }
         finally {
@@ -1096,7 +1097,7 @@ public class JavaActionExecutor extends ActionExecutor {
         }
 
         addActionSpecificEnvVars(env);
-        amContainer.setEnvironment(Collections.unmodifiableMap(env));
+        amContainer.setEnvironment(ImmutableMap.copyOf(env));
 
         // Set the command
         List<String> vargs = new ArrayList<String>(6);
