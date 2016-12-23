@@ -31,6 +31,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledExecutorService;
@@ -694,6 +695,7 @@ public class Instrumentation {
     public String toString() {
         String E = System.getProperty("line.separator");
         StringBuilder sb = new StringBuilder(4096);
+
         for (String element : all.keySet()) {
             sb.append(element).append(':').append(E);
             List<String> groups = new ArrayList<String>(all.get(element).keySet());
@@ -784,9 +786,11 @@ public class Instrumentation {
             if (map.containsKey(name)) {
                 throw new RuntimeException(XLog.format("Sampler group=[{0}] name=[{1}] already defined", group, name));
             }
-            Sampler sampler = new Sampler(period, interval, variable);
-            map.put(name, sampler);
-            scheduler.scheduleAtFixedRate(sampler, 0, sampler.getSamplingInterval(), TimeUnit.SECONDS);
+            else {
+                Sampler sampler = new Sampler(period, interval, variable);
+                map.put(name, sampler);
+                scheduler.scheduleAtFixedRate(sampler, 0, sampler.getSamplingInterval(), TimeUnit.SECONDS);
+            }
         }
         finally {
             samplerLock.unlock();

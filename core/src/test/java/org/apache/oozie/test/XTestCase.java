@@ -113,7 +113,8 @@ import org.apache.oozie.util.XLog;
  * From within testcases, system properties must be changed using the {@link #setSystemProperty} method.
  */
 public abstract class XTestCase extends TestCase {
-    private static EnumSet<YarnApplicationState> YARN_TERMINAL_STATES = EnumSet.of(YarnApplicationState.FAILED, YarnApplicationState.KILLED, YarnApplicationState.FINISHED);
+    private static EnumSet<YarnApplicationState> YARN_TERMINAL_STATES = EnumSet.of(YarnApplicationState.FAILED,
+            YarnApplicationState.KILLED, YarnApplicationState.FINISHED);
     private Map<String, String> sysProps;
     private String testCaseDir;
     private String testCaseConfDir;
@@ -1020,6 +1021,8 @@ public abstract class XTestCase extends TestCase {
       conf.set("yarn.scheduler.capacity.root.default.capacity", "100");
       // Required to prevent deadlocks with YARN CapacityScheduler
       conf.set("yarn.scheduler.capacity.maximum-am-resource-percent", "0.5");
+      // Default value is 90 - if you have low disk space, tests will fail.
+      conf.set("yarn.nodemanager.disk-health-checker.max-disk-utilization-per-disk-percentage", "99");
       return conf;
     }
 
@@ -1255,32 +1258,16 @@ public abstract class XTestCase extends TestCase {
         return finalState.getValue();
     }
 
-    protected void waitUntilYarnAppDoneAndAssertSuccess(String externalId) throws HadoopAccessorException, IOException, YarnException {
+    protected void waitUntilYarnAppDoneAndAssertSuccess(String externalId)
+            throws HadoopAccessorException, IOException, YarnException {
         YarnApplicationState state = waitUntilYarnAppState(externalId, YARN_TERMINAL_STATES);
         assertEquals("YARN App state", YarnApplicationState.FINISHED, state);
     }
 
-    protected void waitUntilYarnAppKilledAndAssertSuccess(String externalId) throws HadoopAccessorException, IOException, YarnException {
+    protected void waitUntilYarnAppKilledAndAssertSuccess(String externalId)
+            throws HadoopAccessorException, IOException, YarnException {
         YarnApplicationState state = waitUntilYarnAppState(externalId, YARN_TERMINAL_STATES);
         assertEquals("YARN App state", YarnApplicationState.KILLED, state);
-    }
-
-    protected YarnApplicationState getYarnApplicationState(String externalId) throws HadoopAccessorException, IOException, YarnException {
-        final ApplicationId appId = ConverterUtils.toApplicationId(externalId);
-        YarnApplicationState state = null;
-        JobConf jobConf = Services.get().get(HadoopAccessorService.class).createJobConf(getJobTrackerUri());
-        // This is needed here because we need a mutable final YarnClient
-        final MutableObject<YarnClient> yarnClientMO = new MutableObject<YarnClient>(null);
-        try {
-            yarnClientMO.setValue(Services.get().get(HadoopAccessorService.class).createYarnClient(getTestUser(), jobConf));
-            state = yarnClientMO.getValue().getApplicationReport(appId).getYarnApplicationState();
-        } finally {
-            if (yarnClientMO.getValue() != null) {
-                yarnClientMO.getValue().close();
-            }
-        }
-
-        return state;
     }
 
     protected class TestLogAppender extends AppenderSkeleton {

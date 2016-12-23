@@ -26,6 +26,7 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
+import java.security.PrivilegedExceptionAction;
 import java.text.MessageFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -36,6 +37,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Objects;
 import java.util.Properties;
 import java.util.Set;
 
@@ -54,6 +56,10 @@ import org.apache.hadoop.mapred.JobConf;
 import org.apache.hadoop.mapred.TaskLog;
 import org.apache.hadoop.mapreduce.filecache.ClientDistributedCacheManager;
 import org.apache.hadoop.mapreduce.v2.util.MRApps;
+import org.apache.hadoop.mapred.JobID;
+import org.apache.hadoop.mapred.RunningJob;
+import org.apache.hadoop.mapreduce.security.token.delegation.DelegationTokenIdentifier;
+import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.hadoop.security.token.Token;
 import org.apache.hadoop.security.token.TokenIdentifier;
 import org.apache.hadoop.util.DiskChecker;
@@ -70,6 +76,7 @@ import org.apache.hadoop.yarn.api.records.YarnApplicationState;
 import org.apache.hadoop.yarn.client.api.YarnClient;
 import org.apache.hadoop.yarn.client.api.YarnClientApplication;
 import org.apache.hadoop.yarn.conf.YarnConfiguration;
+import org.apache.hadoop.yarn.exceptions.YarnException;
 import org.apache.hadoop.yarn.util.ConverterUtils;
 import org.apache.hadoop.yarn.util.Records;
 import org.apache.oozie.WorkflowActionBean;
@@ -85,6 +92,7 @@ import org.apache.oozie.service.HadoopAccessorService;
 import org.apache.oozie.service.Services;
 import org.apache.oozie.service.ShareLibService;
 import org.apache.oozie.service.URIHandlerService;
+import org.apache.oozie.service.UserGroupInformationService;
 import org.apache.oozie.service.WorkflowAppService;
 import org.apache.oozie.util.ClasspathUtils;
 import org.apache.oozie.util.ELEvaluationException;
@@ -498,8 +506,8 @@ public class JavaActionExecutor extends ActionExecutor {
         }
         catch (Exception ex) {
             LOG.debug(
-                    "Errors when add to DistributedCache. Path=" + uri.toString() + ", archive=" + archive + ", conf="
-                            + XmlUtils.prettyPrint(conf).toString());
+                    "Errors when add to DistributedCache. Path=" + Objects.toString(uri, "<null>") + ", archive="
+                            + archive + ", conf=" + XmlUtils.prettyPrint(conf).toString());
             throw convertException(ex);
         }
     }
@@ -622,7 +630,7 @@ public class JavaActionExecutor extends ActionExecutor {
         if (shareLibService != null) {
             try {
                 List<Path> listOfPaths = shareLibService.getSystemLibJars(JavaActionExecutor.OOZIE_COMMON_LIBDIR);
-                if (listOfPaths == null || listOfPaths.isEmpty()) {
+                if (listOfPaths.isEmpty()) {
                     throw new ActionExecutorException(ActionExecutorException.ErrorType.FAILED, "EJ001",
                             "Could not locate Oozie sharelib");
                 }
@@ -632,7 +640,7 @@ public class JavaActionExecutor extends ActionExecutor {
                     DistributedCache.createSymlink(conf);
                 }
                 listOfPaths = shareLibService.getSystemLibJars(getType());
-                if (listOfPaths != null) {
+                if (!listOfPaths.isEmpty()) {
                     for (Path actionLibPath : listOfPaths) {
                         JobUtils.addFileToClassPath(actionLibPath, conf, fs);
                         DistributedCache.createSymlink(conf);
@@ -1166,15 +1174,16 @@ public class JavaActionExecutor extends ActionExecutor {
                 if ("false".equals(actionConf.get(OOZIE_CREDENTIALS_SKIP)) ||
                     !wfJobConf.getBoolean(OOZIE_CREDENTIALS_SKIP, ConfigurationService.getBoolean(OOZIE_CREDENTIALS_SKIP))) {
                     credPropertiesMap = getActionCredentialsProperties(context, action);
-                    if (credPropertiesMap != null) {
-                        for (String key : credPropertiesMap.keySet()) {
-                            CredentialsProperties prop = credPropertiesMap.get(key);
-                            if (prop != null) {
+                    if (!credPropertiesMap.isEmpty()) {
+                        for (Entry<String, CredentialsProperties> entry : credPropertiesMap.entrySet()) {
+                            if (entry.getValue() != null) {
+                                CredentialsProperties prop = entry.getValue();
                                 LOG.debug("Credential Properties set for action : " + action.getId());
-                                for (String property : prop.getProperties().keySet()) {
-                                    actionConf.set(property, prop.getProperties().get(property));
-                                    LOG.debug("property : '" + property + "', value : '" + prop.getProperties().get(property)
-                                            + "'");
+                                for (Entry<String, String> propEntry : prop.getProperties().entrySet()) {
+                                    String key = propEntry.getKey();
+                                    String value = propEntry.getValue();
+                                    actionConf.set(key, value);
+                                    LOG.debug("property : '" + key + "', value : '" + value + "'");
                                 }
                             }
                         }
@@ -1360,7 +1369,8 @@ public class JavaActionExecutor extends ActionExecutor {
     }
 
     /**
-     * If returns true, it means that we have to add Hadoop MR jars to the classpath. Subclasses should override this method if necessary.
+     * If returns true, it means that we have to add Hadoop MR jars to the classpath.
+     * Subclasses should override this method if necessary.
      *
      */
     protected boolean needToAddMRJars() {
@@ -1368,7 +1378,8 @@ public class JavaActionExecutor extends ActionExecutor {
     }
 
     /**
-     * Adds action-specific environment variables. Default implementation is no-op. Subclasses should override this method if necessary.
+     * Adds action-specific environment variables. Default implementation is no-op.
+     * Subclasses should override this method if necessary.
      *
      */
     protected void addActionSpecificEnvVars(Map<String, String> env) {
@@ -1519,9 +1530,11 @@ public class JavaActionExecutor extends ActionExecutor {
         YarnClient yarnClient = null;
         try {
             Element actionXml = XmlUtils.parseXml(action.getConf());
+
             JobConf jobConf = createBaseHadoopConf(context, actionXml);
             yarnClient = createYarnClient(context, jobConf);
             yarnClient.killApplication(ConverterUtils.toApplicationId(action.getExternalId()));
+
             context.setExternalStatus(KILLED);
             context.setExecutionData(KILLED, null);
         } catch (Exception ex) {
