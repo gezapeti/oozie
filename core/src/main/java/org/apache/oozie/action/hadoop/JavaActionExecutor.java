@@ -26,11 +26,9 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
-import java.security.PrivilegedExceptionAction;
 import java.text.MessageFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -56,10 +54,6 @@ import org.apache.hadoop.mapred.JobConf;
 import org.apache.hadoop.mapred.TaskLog;
 import org.apache.hadoop.mapreduce.filecache.ClientDistributedCacheManager;
 import org.apache.hadoop.mapreduce.v2.util.MRApps;
-import org.apache.hadoop.mapred.JobID;
-import org.apache.hadoop.mapred.RunningJob;
-import org.apache.hadoop.mapreduce.security.token.delegation.DelegationTokenIdentifier;
-import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.hadoop.security.token.Token;
 import org.apache.hadoop.security.token.TokenIdentifier;
 import org.apache.hadoop.util.DiskChecker;
@@ -76,7 +70,6 @@ import org.apache.hadoop.yarn.api.records.YarnApplicationState;
 import org.apache.hadoop.yarn.client.api.YarnClient;
 import org.apache.hadoop.yarn.client.api.YarnClientApplication;
 import org.apache.hadoop.yarn.conf.YarnConfiguration;
-import org.apache.hadoop.yarn.exceptions.YarnException;
 import org.apache.hadoop.yarn.util.ConverterUtils;
 import org.apache.hadoop.yarn.util.Records;
 import org.apache.oozie.WorkflowActionBean;
@@ -92,7 +85,6 @@ import org.apache.oozie.service.HadoopAccessorService;
 import org.apache.oozie.service.Services;
 import org.apache.oozie.service.ShareLibService;
 import org.apache.oozie.service.URIHandlerService;
-import org.apache.oozie.service.UserGroupInformationService;
 import org.apache.oozie.service.WorkflowAppService;
 import org.apache.oozie.util.ClasspathUtils;
 import org.apache.oozie.util.ELEvaluationException;
@@ -107,13 +99,13 @@ import org.jdom.Element;
 import org.jdom.JDOMException;
 import org.jdom.Namespace;
 
+import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.io.Closeables;
 
 
 public class JavaActionExecutor extends ActionExecutor {
-
     public static final String RUNNING = "RUNNING";
     public static final String SUCCEEDED = "SUCCEEDED";
     public static final String KILLED = "KILLED";
@@ -123,18 +115,16 @@ public class JavaActionExecutor extends ActionExecutor {
     public static final String HADOOP_NAME_NODE = "fs.default.name";
     public static final String OOZIE_COMMON_LIBDIR = "oozie";
 
+    public static final String DEFAULT_LAUNCHER_VCORES = "oozie.launcher.default.vcores";
+    public static final String DEFAULT_LAUNCHER_MEMORY = "oozie.launcher.default.memory";
+    public static final String DEFAULT_LAUNCHER_PRIORITY = "oozie.launcher.default.priority";
+    public static final String DEFAULT_LAUNCHER_QUEUE = "oozie.launcher.default.queue";
+
     public static final String MAX_EXTERNAL_STATS_SIZE = "oozie.external.stats.max.size";
     public static final String ACL_VIEW_JOB = "mapreduce.job.acl-view-job";
     public static final String ACL_MODIFY_JOB = "mapreduce.job.acl-modify-job";
     public static final String HADOOP_YARN_TIMELINE_SERVICE_ENABLED = "yarn.timeline-service.enabled";
     public static final String HADOOP_YARN_KILL_CHILD_JOBS_ON_AMRESTART = "oozie.action.launcher.am.restart.kill.childjobs";
-    public static final String HADOOP_MAP_MEMORY_MB = "mapreduce.map.memory.mb";
-    public static final String HADOOP_CHILD_JAVA_OPTS = "mapred.child.java.opts";
-    public static final String HADOOP_MAP_JAVA_OPTS = "mapreduce.map.java.opts";
-    public static final String HADOOP_REDUCE_JAVA_OPTS = "mapreduce.reduce.java.opts";
-    public static final String HADOOP_CHILD_JAVA_ENV = "mapred.child.env";
-    public static final String HADOOP_MAP_JAVA_ENV = "mapreduce.map.env";
-    public static final String HADOOP_JOB_CLASSLOADER = "mapreduce.job.classloader";
     public static final String HADOOP_USER_CLASSPATH_FIRST = "mapreduce.user.classpath.first";
     public static final String OOZIE_CREDENTIALS_SKIP = "oozie.credentials.skip";
     public static final String YARN_AM_RESOURCE_MB = "yarn.app.mapreduce.am.resource.mb";
@@ -144,7 +134,6 @@ public class JavaActionExecutor extends ActionExecutor {
 
     private static final String JAVA_MAIN_CLASS_NAME = "org.apache.oozie.action.hadoop.JavaMain";
     private static final String HADOOP_JOB_NAME = "mapred.job.name";
-    private static final Set<String> DISALLOWED_PROPERTIES = new HashSet<String>();
 
     private static int maxActionOutputLen;
     private static int maxExternalStatsSize;
@@ -156,12 +145,6 @@ public class JavaActionExecutor extends ActionExecutor {
     private static final String JAVA_TMP_DIR_SETTINGS = "-Djava.io.tmpdir=";
 
     public XConfiguration workflowConf = null;
-
-    static {
-        DISALLOWED_PROPERTIES.add(HADOOP_USER);
-        DISALLOWED_PROPERTIES.add(HADOOP_NAME_NODE);
-        DISALLOWED_PROPERTIES.add(HADOOP_YARN_RM);
-    }
 
     public JavaActionExecutor() {
         this("java");
@@ -227,15 +210,6 @@ public class JavaActionExecutor extends ActionExecutor {
      */
     public static int getMaxExternalStatsSize() {
         return maxExternalStatsSize;
-    }
-
-    static void checkForDisallowedProps(Configuration conf, String confName) throws ActionExecutorException {
-        for (String prop : DISALLOWED_PROPERTIES) {
-            if (conf.get(prop) != null) {
-                throw new ActionExecutorException(ActionExecutorException.ErrorType.FAILED, "JA010",
-                        "Property [{0}] not allowed in action [{1}] configuration", prop, confName);
-            }
-        }
     }
 
     public JobConf createBaseHadoopConf(Context context, Element actionXml) {
@@ -306,7 +280,6 @@ public class JavaActionExecutor extends ActionExecutor {
                 throw convertException(ex);
             }
             XConfiguration.copy(launcherConf, conf);
-            checkForDisallowedProps(launcherConf, "launcher configuration");
             // Inject config-class for launcher to use for action
             Element e = actionXml.getChild("config-class", ns);
             if (e != null) {
@@ -383,7 +356,7 @@ public class JavaActionExecutor extends ActionExecutor {
             catch (Exception ex) {
                 context.setErrorInfo("EL_ERROR", ex.getMessage());
             }
-            checkForDisallowedProps(jobXmlConf, "job-xml");
+
             if (isLauncher) {
                 injectLauncherProperties(jobXmlConf, conf);
             } else {
@@ -394,7 +367,6 @@ public class JavaActionExecutor extends ActionExecutor {
         if (e != null) {
             String strConf = XmlUtils.prettyPrint(e).toString();
             XConfiguration inlineConf = new XConfiguration(new StringReader(strConf));
-            checkForDisallowedProps(inlineConf, "inline configuration");
             if (isLauncher) {
                 injectLauncherProperties(inlineConf, conf);
             } else {
@@ -568,7 +540,6 @@ public class JavaActionExecutor extends ActionExecutor {
                                     Configuration jobXmlConf = shareLibService.getShareLibConf(actionShareLibName,
                                             actionLibPath);
                                     if (jobXmlConf != null) {
-                                        checkForDisallowedProps(jobXmlConf, actionLibPath.getName());
                                         XConfiguration.injectDefaults(jobXmlConf, conf);
                                         LOG.trace("Adding properties of " + actionLibPath + " to job conf");
                                     }
@@ -768,16 +739,6 @@ public class JavaActionExecutor extends ActionExecutor {
         }
     }
 
-    private static final String QUEUE_NAME = "mapred.job.queue.name";
-
-    private static final Set<String> SPECIAL_PROPERTIES = new HashSet<String>();
-
-    static {
-        SPECIAL_PROPERTIES.add(QUEUE_NAME);
-        SPECIAL_PROPERTIES.add(ACL_VIEW_JOB);
-        SPECIAL_PROPERTIES.add(ACL_MODIFY_JOB);
-    }
-
     @SuppressWarnings("unchecked")
     JobConf createLauncherConf(FileSystem actionFs, Context context, WorkflowAction action, Element actionXml, Configuration actionConf)
             throws ActionExecutorException {
@@ -870,29 +831,8 @@ public class JavaActionExecutor extends ActionExecutor {
             }
             LauncherMapperHelper.setupMainArguments(launcherJobConf, args);
 
-            // Make mapred.child.java.opts and mapreduce.map.java.opts equal, but give values from the latter priority; also append
-            // <java-opt> and <java-opts> and give those highest priority
-            StringBuilder opts = new StringBuilder(launcherJobConf.get(HADOOP_CHILD_JAVA_OPTS, ""));
-            if (launcherJobConf.get(HADOOP_MAP_JAVA_OPTS) != null) {
-                opts.append(" ").append(launcherJobConf.get(HADOOP_MAP_JAVA_OPTS));
-            }
-            List<Element> javaopts = actionXml.getChildren("java-opt", ns);
-            for (Element opt: javaopts) {
-                opts.append(" ").append(opt.getTextTrim());
-            }
-            Element opt = actionXml.getChild("java-opts", ns);
-            if (opt != null) {
-                opts.append(" ").append(opt.getTextTrim());
-            }
-            launcherJobConf.set(HADOOP_CHILD_JAVA_OPTS, opts.toString().trim());
-            launcherJobConf.set(HADOOP_MAP_JAVA_OPTS, opts.toString().trim());
-
             updateConfForJavaTmpDir(launcherJobConf);
             injectLauncherTimelineServiceEnabled(launcherJobConf, actionConf);
-
-            // properties from action that are needed by the launcher (e.g. QUEUE NAME, ACLs)
-            // maybe we should add queue to the WF schema, below job-tracker
-            actionConfToLauncherConf(actionConf, launcherJobConf);
 
             return launcherJobConf;
         }
@@ -914,14 +854,6 @@ public class JavaActionExecutor extends ActionExecutor {
         injectCallback(context, launcherConf);
     }
 
-    private void actionConfToLauncherConf(Configuration actionConf, JobConf launcherConf) {
-        for (String name : SPECIAL_PROPERTIES) {
-            if (actionConf.get(name) != null && launcherConf.get("oozie.launcher." + name) == null) {
-                launcherConf.set(name, actionConf.get(name));
-            }
-        }
-    }
-
     public void submitLauncher(FileSystem actionFs, final Context context, WorkflowAction action) throws ActionExecutorException {
         YarnClient yarnClient = null;
         try {
@@ -933,7 +865,6 @@ public class JavaActionExecutor extends ActionExecutor {
             }
 
             Element actionXml = XmlUtils.parseXml(action.getConf());
-            LOG.info("ActionXML: {0}", action.getConf());
 
             // action job configuration
             Configuration actionConf = loadHadoopDefaultResources(context, actionXml);
@@ -1042,7 +973,7 @@ public class JavaActionExecutor extends ActionExecutor {
                 YarnClientApplication newApp = yarnClient.createApplication();
                 ApplicationId appId = newApp.getNewApplicationResponse().getApplicationId();
                 ApplicationSubmissionContext appContext =
-                        createAppSubmissionContext(appId, launcherJobConf, user, context, actionConf);
+                        createAppSubmissionContext(appId, launcherJobConf, user, context, actionConf, actionXml);
                 yarnClient.submitApplication(appContext);
 
                 launcherId = appId.toString();
@@ -1065,19 +996,77 @@ public class JavaActionExecutor extends ActionExecutor {
     }
 
     private ApplicationSubmissionContext createAppSubmissionContext(ApplicationId appId, JobConf launcherJobConf, String user,
-                                                                    Context context, Configuration actionConf)
+                                                                    Context context, Configuration actionConf, Element actionXml)
             throws IOException, HadoopAccessorException, URISyntaxException {
 
         ApplicationSubmissionContext appContext = Records.newRecord(ApplicationSubmissionContext.class);
+
+        int vcores;
+        int memory;
+        int priority;
+        String queue;
+
+        if (launcherJobConf.get(LauncherAM.OOZIE_LAUNCHER_MEMORY_PROPERTY) != null) {
+            memory = launcherJobConf.getInt(LauncherAM.OOZIE_LAUNCHER_MEMORY_PROPERTY, -1);
+            Preconditions.checkArgument(memory > 0, "Launcher memory is 0 or negative");
+        } else {
+            int defaultMemory = ConfigurationService.getInt(DEFAULT_LAUNCHER_MEMORY, -1);
+            Preconditions.checkArgument(defaultMemory > 0, "Default launcher memory is 0 or negative");
+            memory = defaultMemory;
+        }
+
+        if (launcherJobConf.get(LauncherAM.OOZIE_LAUNCHER_VCORES_PROPERTY) != null) {
+            vcores = launcherJobConf.getInt(LauncherAM.OOZIE_LAUNCHER_VCORES_PROPERTY, -1);
+            Preconditions.checkArgument(vcores > 0, "Launcher vcores is 0 or negative");
+        } else {
+            int defaultVcores = ConfigurationService.getInt(DEFAULT_LAUNCHER_VCORES);
+            Preconditions.checkArgument(defaultVcores > 0, "Default launcher vcores is 0 or negative");
+            vcores = defaultVcores;
+        }
+
+        if (launcherJobConf.get(LauncherAM.OOZIE_LAUNCHER_PRIORITY_PROPERTY) != null) {
+            priority = launcherJobConf.getInt(LauncherAM.OOZIE_LAUNCHER_PRIORITY_PROPERTY, -1);
+        } else {
+            int defaultPriority = ConfigurationService.getInt(DEFAULT_LAUNCHER_PRIORITY);
+            priority = defaultPriority;
+        }
+
+        if (launcherJobConf.get(LauncherAM.OOZIE_LAUNCHER_QUEUE_PROPERTY) != null) {
+            queue = launcherJobConf.get(LauncherAM.OOZIE_LAUNCHER_QUEUE_PROPERTY);
+        } else {
+            queue = Preconditions.checkNotNull(ConfigurationService.get(DEFAULT_LAUNCHER_QUEUE), "Default queue is undefined");
+        }
+
+        // Note: for backward compatibility reasons, we have to support the <java-opts> tag inside the <java> action
+        // If both java/java-opt(s) and launcher/java-opts are defined, we pick java/java-opts
+        // We also display a warning to let users know that they should migrate their workflow
+        StringBuilder javaOpts = new StringBuilder();
+        Namespace ns = actionXml.getNamespace();
+        boolean oldJavaOpts = false;
+        @SuppressWarnings("unchecked")
+        List<Element> javaopts = actionXml.getChildren("java-opt", ns);
+        for (Element opt: javaopts) {
+            javaOpts.append(" ").append(opt.getTextTrim());
+            oldJavaOpts = true;
+        }
+        Element opt = actionXml.getChild("java-opts", ns);
+        if (opt != null) {
+            javaOpts.append(" ").append(opt.getTextTrim());
+            oldJavaOpts = true;
+        }
+
+        if (oldJavaOpts) {
+            LOG.warn("Note: <java-opts> inside the action is used in the workflow. Please move <java-opts> tag under"
+                    + " the <launcher> element. See the documentation for details");
+        }
 
         appContext.setApplicationId(appId);
         appContext.setApplicationName(launcherJobConf.getJobName());
         appContext.setApplicationType("Oozie Launcher");
         Priority pri = Records.newRecord(Priority.class);
-        int priority = 0; // TODO: OYA: Add a constant or a config
         pri.setPriority(priority);
         appContext.setPriority(pri);
-        appContext.setQueue(launcherJobConf.getQueueName());
+        appContext.setQueue(queue);
         ContainerLaunchContext amContainer = Records.newRecord(ContainerLaunchContext.class);
 
         // Set the resources to localize
@@ -1099,7 +1088,6 @@ public class JavaActionExecutor extends ActionExecutor {
         // This adds the Hadoop jars to the classpath in the Launcher JVM
         ClasspathUtils.setupClasspath(env, launcherJobConf);
 
-        // FIXME: move this to specific places where it's actually needed - keeping it here for now
         if (needToAddMRJars()) {
             ClasspathUtils.addMapReduceToClasspath(env, launcherJobConf);
         }
@@ -1119,11 +1107,22 @@ public class JavaActionExecutor extends ActionExecutor {
         vargs.add("-Dhadoop.root.logger=INFO,CLA");
         vargs.add("-Dhadoop.root.logfile=" + TaskLog.LogName.SYSLOG);
         vargs.add("-Dsubmitter.user=" + context.getWorkflow().getUser());
+
+        if (oldJavaOpts) {
+            vargs.add(javaOpts.toString());
+        }
+
+        if (launcherJobConf.get(LauncherAM.OOZIE_LAUNCHER_JAVAOPTS_PROPERTY) != null) {
+            if (oldJavaOpts) {
+                LOG.warn("<java-opts> was defined inside the <launcher> tag -- ignored");
+            } else {
+                vargs.add(launcherJobConf.get(LauncherAM.OOZIE_LAUNCHER_JAVAOPTS_PROPERTY));
+            }
+        }
+
         vargs.add(LauncherAM.class.getCanonicalName());
-        vargs.add("1>" + ApplicationConstants.LOG_DIR_EXPANSION_VAR +
-                Path.SEPARATOR + ApplicationConstants.STDOUT);
-        vargs.add("2>" + ApplicationConstants.LOG_DIR_EXPANSION_VAR +
-                Path.SEPARATOR + ApplicationConstants.STDERR);
+        vargs.add("1>" + ApplicationConstants.LOG_DIR_EXPANSION_VAR + Path.SEPARATOR + ApplicationConstants.STDOUT);
+        vargs.add("2>" + ApplicationConstants.LOG_DIR_EXPANSION_VAR + Path.SEPARATOR + ApplicationConstants.STDERR);
         StringBuilder mergedCommand = new StringBuilder();
         for (CharSequence str : vargs) {
             mergedCommand.append(str).append(" ");
@@ -1140,8 +1139,7 @@ public class JavaActionExecutor extends ActionExecutor {
         amContainer.setTokens(ByteBuffer.wrap(dob.getData(), 0, dob.getLength()));
 
         // Set Resources
-        // TODO: OYA: make resources allocated for the AM configurable and choose good defaults (memory MB, vcores)
-        Resource resource = Resource.newInstance(2048, 1);
+        Resource resource = Resource.newInstance(memory, vcores);
         appContext.setResource(resource);
 
         return appContext;

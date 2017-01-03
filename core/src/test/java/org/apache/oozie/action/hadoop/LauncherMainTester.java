@@ -31,6 +31,11 @@ public class LauncherMainTester {
             System.out.println("Hello World!");
         }
 
+        String testJavaOpts = System.getProperty("testJavaOpts");
+        if (testJavaOpts != null && Boolean.parseBoolean(testJavaOpts)) {
+            throw new RuntimeException("Failing on purpose");
+        }
+
         if (args.length == 1) {
             if (args[0].equals("throwable")) {
                 throw new Throwable("throwing throwable");

@@ -242,7 +242,7 @@ public abstract class ActionExecutorTestCase extends XHCatTestCase {
     protected WorkflowJobBean createBaseWorkflow(XConfiguration protoConf, String actionName) throws Exception {
         Path appUri = new Path(getAppPath(), "workflow.xml");
 
-        String content = "<workflow-app xmlns='uri:oozie:workflow:0.1'  xmlns:sla='uri:oozie:sla:0.1' name='no-op-wf'>";
+        String content = "<workflow-app xmlns='uri:oozie:workflow:0.6'  xmlns:sla='uri:oozie:sla:0.1' name='no-op-wf'>";
         content += "<start to='end' />";
         content += "<end name='end' /></workflow-app>";
         writeToFile(content, getAppPath(), "workflow.xml");

@@ -46,8 +46,14 @@ import com.google.common.base.Objects;
 import com.google.common.base.Preconditions;
 
 public class LauncherAM {
-    private static final String OOZIE_ACTION_CONF_XML = "oozie.action.conf.xml";
-    private static final String OOZIE_LAUNCHER_JOB_ID = "oozie.launcher.job.id";
+    public static final String OOZIE_LAUNCHER_VCORES_PROPERTY = "oozie.launcher.vcores";
+    public static final String OOZIE_LAUNCHER_MEMORY_PROPERTY = "oozie.launcher.memory";
+    public static final String OOZIE_LAUNCHER_PRIORITY_PROPERTY = "oozie.launcher.priorty";
+    public static final String OOZIE_LAUNCHER_QUEUE_PROPERTY = "oozie.launcher.queue";
+    public static final String OOZIE_LAUNCHER_JAVAOPTS_PROPERTY = "oozie.launcher.javaopts";
+    public static final String OOZIE_LAUNCHER_ENV_PROPERTY = "oozie.launcher.env";
+    public static final String OOZIE_LAUNCHER_SHARELIB_PROPERTY = "oozie.launcher.sharelib";
+
     public static final String ACTIONOUTPUTTYPE_ID_SWAP = "IdSwap";
     public static final String ACTIONOUTPUTTYPE_OUTPUT = "Output";
     public static final String ACTIONOUTPUTTYPE_STATS = "Stats";
@@ -75,6 +81,9 @@ public class LauncherAM {
     public static final String LAUNCHER_JOB_CONF_XML = "launcher.xml";
     public static final String ACTION_CONF_XML = "action.xml";
     public static final String ACTION_DATA_FINAL_STATUS = "final.status";
+
+    private static final String OOZIE_ACTION_CONF_XML = "oozie.action.conf.xml";
+    private static final String OOZIE_LAUNCHER_JOB_ID = "oozie.launcher.job.id";
 
     private final UserGroupInformation ugi;
     private final AMRMCallBackHandler callbackHandler;

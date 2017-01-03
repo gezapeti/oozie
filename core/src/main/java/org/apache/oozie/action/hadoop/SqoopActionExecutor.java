@@ -77,7 +77,6 @@ public class SqoopActionExecutor extends JavaActionExecutor {
             if (e != null) {
                 String strConf = XmlUtils.prettyPrint(e).toString();
                 XConfiguration inlineConf = new XConfiguration(new StringReader(strConf));
-                checkForDisallowedProps(inlineConf, "inline configuration");
                 XConfiguration.copy(inlineConf, actionConf);
             }
         } catch (IOException ex) {

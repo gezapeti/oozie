@@ -24,16 +24,9 @@
             <xs:element name="memory" minOccurs="0" maxOccurs="1" type="xs:integer"/>
             <xs:element name="vcores" minOccurs="0" maxOccurs="1" type="xs:integer"/>
             <xs:element name="java-opts" minOccurs="0" maxOccurs="1" type="xs:string"/>
-            <xs:element name="env" minOccurs="0" maxOccurs="unbounded" type="common:KEYVALUE"/>
+            <xs:element name="env" minOccurs="0" maxOccurs="unbounded" type="xs:string"/>
             <xs:element name="queue" minOccurs="0" maxOccurs="1" type="xs:string"/>
             <xs:element name="sharelib" minOccurs="0" maxOccurs="1" type="xs:string"/>
-        </xs:sequence>
-    </xs:complexType>
-
-    <xs:complexType name="KEYVALUE">
-        <xs:sequence>
-            <xs:element name="key" minOccurs="1" maxOccurs="1" type="xs:string" />
-            <xs:element name="value" minOccurs="1" maxOccurs="1" type="xs:string" />
         </xs:sequence>
     </xs:complexType>
 </xs:schema>

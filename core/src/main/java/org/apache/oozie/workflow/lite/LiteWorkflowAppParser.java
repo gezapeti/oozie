@@ -29,10 +29,7 @@ import java.io.Reader;
 import java.io.StringReader;
 import java.io.StringWriter;
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.zip.Deflater;
 import java.util.zip.DeflaterOutputStream;
 import java.util.zip.Inflater;
@@ -49,6 +46,7 @@ import org.apache.hadoop.io.Writable;
 import org.apache.oozie.ErrorCode;
 import org.apache.oozie.action.ActionExecutor;
 import org.apache.oozie.action.hadoop.FsActionExecutor;
+import org.apache.oozie.action.hadoop.LauncherAM;
 import org.apache.oozie.action.oozie.SubWorkflowActionExecutor;
 import org.apache.oozie.service.ActionService;
 import org.apache.oozie.service.ConfigurationService;
@@ -66,9 +64,6 @@ import org.jdom.JDOMException;
 import org.jdom.Namespace;
 import org.xml.sax.SAXException;
 
-import com.google.common.base.Joiner;
-import com.google.common.base.Preconditions;
-
 /**
  * Class to parse and validate workflow xml
  */
@@ -77,6 +72,7 @@ public class LiteWorkflowAppParser {
     private static final String LAUNCHER_E = "launcher";
     private static final String LAUNCHER_MEMORY = "memory";
     private static final String LAUNCHER_VCORES = "vcores";
+    private static final String LAUNCHER_PRIORITY = "priority";
     private static final String LAUNCHER_JAVAOPTS = "java-opts";
     private static final String LAUNCHER_ENV = "env";
     private static final String LAUNCHER_SHARELIB = "sharelib";
@@ -377,17 +373,15 @@ public class LiteWorkflowAppParser {
         String nameNode;
         List<String> jobXmls;
         Configuration conf;
-        LauncherConfig launcherConfig;
 
         public GlobalSectionData() {
         }
 
-        public GlobalSectionData(String jobTracker, String nameNode, List<String> jobXmls, Configuration conf, LauncherConfig launcherConfig) {
+        public GlobalSectionData(String jobTracker, String nameNode, List<String> jobXmls, Configuration conf) {
             this.jobTracker = jobTracker;
             this.nameNode = nameNode;
             this.jobXmls = jobXmls;
             this.conf = conf;
-            this.launcherConfig = Preconditions.checkNotNull(launcherConfig, "launcherConfig should not be null");
         }
 
         @Override
@@ -408,7 +402,6 @@ public class LiteWorkflowAppParser {
             } else {
                 WritableUtils.writeStr(dataOutput, null);
             }
-            launcherConfig.write(dataOutput);
         }
 
         @Override
@@ -426,7 +419,6 @@ public class LiteWorkflowAppParser {
             if(confString != null) {
                 conf = new XConfiguration(new StringReader(confString));
             }
-            launcherConfig = LauncherConfig.fromWritable(dataInput);
         }
     }
 
@@ -455,7 +447,7 @@ public class LiteWorkflowAppParser {
                 }
             }
 
-            Configuration globalConf = null;
+            Configuration globalConf = new XConfiguration();
             Element globalConfigurationElement = global.getChild(CONFIGURATION, ns);
             if (globalConfigurationElement != null) {
                 try {
@@ -465,14 +457,11 @@ public class LiteWorkflowAppParser {
                 }
             }
 
-            // Define an empty launcher config with some default values
-            LauncherConfig launcherConfig = LauncherConfig.DEFAULT_LAUNCHER_CONFIG;
-
             Element globalLauncherElement = global.getChild(LAUNCHER_E, ns);
             if (globalLauncherElement != null) {
-                launcherConfig = getLauncherConfig(globalLauncherElement);
+                processLauncherConfig(globalConf, globalLauncherElement);
             }
-            gData = new GlobalSectionData(globalJobTracker, globalNameNode, globalJobXmls, globalConf, launcherConfig);
+            gData = new GlobalSectionData(globalJobTracker, globalNameNode, globalJobXmls, globalConf);
         }
         return gData;
     }
@@ -519,10 +508,6 @@ public class LiteWorkflowAppParser {
             }
         }
 
-        if (actionElement.getChild(LAUNCHER_E) == null && gData.launcherConfig != null) {
-            addLauncherConfigToAction(gData.launcherConfig, actionElement);
-        }
-
         // If this is the global section or ActionExecutor.supportsConfigurationJobXML() returns true, we parse the action's
         // <configuration> and <job-xml> fields.  We also merge this with those from the <global> section, if given.  If none are
         // defined, empty values are placed.  Exceptions are thrown if there's an error parsing, but not if they're not given.
@@ -553,12 +538,19 @@ public class LiteWorkflowAppParser {
                 if (gData != null && gData.conf != null) {
                     XConfiguration.copy(gData.conf, actionConf);
                 }
+
+                Element launcherConfiguration = actionElement.getChild(LAUNCHER_E, actionNs);
+                if (launcherConfiguration != null) {
+                    processLauncherConfig(actionConf, launcherConfiguration);
+                }
+
                 Element actionConfiguration = actionElement.getChild(CONFIGURATION, actionNs);
                 if (actionConfiguration != null) {
                     //copy and override
                     XConfiguration.copy(new XConfiguration(new StringReader(XmlUtils.prettyPrint(actionConfiguration).toString())),
                             actionConf);
                 }
+
                 int position = actionElement.indexOf(actionConfiguration);
                 actionElement.removeContent(actionConfiguration); //replace with enhanced one
                 Element eConfXml = XmlUtils.parseXml(actionConf.toXmlString(false));
@@ -580,65 +572,42 @@ public class LiteWorkflowAppParser {
         }
     }
 
-    private void addLauncherConfigToAction(LauncherConfig launcherConfig, Element actionElement) {
-        Namespace ns = actionElement.getNamespace();
-        Element child = new Element(LAUNCHER_E, ns);
-        actionElement.addContent(child);
+    private void processLauncherConfig(Configuration globalConf, Element globalLauncherElement) {
+        final Namespace ns = globalLauncherElement.getNamespace();
 
-        Element launcherElement = actionElement.getChild(LAUNCHER_E);
-
-        addChildElement(launcherElement, ns, LAUNCHER_VCORES, String.valueOf(launcherConfig.getVcores()));
-        addChildElement(launcherElement, ns, LAUNCHER_MEMORY, String.valueOf(launcherConfig.getMemory()));
-        addChildElement(launcherElement, ns, LAUNCHER_JAVAOPTS, launcherConfig.getJavaOpts());
-        addChildElement(launcherElement, ns, LAUNCHER_SHARELIB, Joiner.on(",").join(launcherConfig.getSharelibs()));
-        addChildElement(launcherElement, ns, LAUNCHER_ENV, Joiner.on("=").withKeyValueSeparator(":").join(launcherConfig.getEnv()));
-        addChildElement(launcherElement, ns, LAUNCHER_QUEUE, launcherConfig.getQueue());
-    }
-
-    private LauncherConfig getLauncherConfig(Element globalLauncherElement) {
-        int memory = LauncherConfig.DEFAULT_MEMORY;
-        if (globalLauncherElement.getChild(LAUNCHER_MEMORY) != null) {
-            memory = Integer.parseInt(globalLauncherElement.getChild(LAUNCHER_MEMORY).getText());
+        if (globalLauncherElement.getChild(LAUNCHER_MEMORY, ns) != null) {
+            globalConf.setInt(LauncherAM.OOZIE_LAUNCHER_MEMORY_PROPERTY,
+                    Integer.parseInt(globalLauncherElement.getChild(LAUNCHER_MEMORY, ns).getText()));
         }
 
-        int vcores = LauncherConfig.DEFAULT_VCORES;
-        if (globalLauncherElement.getChild(LAUNCHER_VCORES) != null) {
-            vcores = Integer.parseInt(globalLauncherElement.getChild(LAUNCHER_VCORES).getText());
+        if (globalLauncherElement.getChild(LAUNCHER_VCORES, ns) != null) {
+            globalConf.setInt(LauncherAM.OOZIE_LAUNCHER_VCORES_PROPERTY,
+                    Integer.parseInt(globalLauncherElement.getChild(LAUNCHER_VCORES, ns).getText()));
         }
 
-        String javaOpts = null;
-        if (globalLauncherElement.getChild(LAUNCHER_JAVAOPTS) != null) {
-            javaOpts = globalLauncherElement.getChild(LAUNCHER_JAVAOPTS).getText();
+        if (globalLauncherElement.getChild(LAUNCHER_PRIORITY, ns) != null) {
+            globalConf.setInt(LauncherAM.OOZIE_LAUNCHER_PRIORITY_PROPERTY,
+                    Integer.parseInt(globalLauncherElement.getChild(LAUNCHER_PRIORITY, ns).getText()));
         }
 
-        Map<String, String> env = Collections.emptyMap();
-        if (globalLauncherElement.getChild(LAUNCHER_ENV) != null) {
-            String envString = globalLauncherElement.getChild(LAUNCHER_ENV).getText();
-
-            env = new HashMap<>();
-
-            String keyVals[] = envString.split(":");
-            for (final String keyValString : keyVals) {
-                String keyVal[] = keyValString.split("=");
-                env.put(keyVal[0], keyVal[1]);
-            }
+        if (globalLauncherElement.getChild(LAUNCHER_JAVAOPTS, ns) != null) {
+            globalConf.set(LauncherAM.OOZIE_LAUNCHER_JAVAOPTS_PROPERTY,
+                    globalLauncherElement.getChild(LAUNCHER_JAVAOPTS, ns).getText());
         }
 
-        String queue = null;
-        if (globalLauncherElement.getChild(LAUNCHER_QUEUE) != null) {
-            queue = globalLauncherElement.getChild(LAUNCHER_QUEUE).getText();
+        if (globalLauncherElement.getChild(LAUNCHER_ENV, ns) != null) {
+            globalConf.set(LauncherAM.OOZIE_LAUNCHER_ENV_PROPERTY,
+                    globalLauncherElement.getChild(LAUNCHER_ENV, ns).getText());
         }
 
-        List<String> shareLibs = Collections.emptyList();
-        if (globalLauncherElement.getChild(LAUNCHER_SHARELIB) != null) {
-            String sharelibString = globalLauncherElement.getChild(LAUNCHER_SHARELIB).getText();
-
-            for (final String sharelib : sharelibString.split(",")) {
-                shareLibs.add(sharelib);
-            }
+        if (globalLauncherElement.getChild(LAUNCHER_QUEUE, ns) != null) {
+            globalConf.set(LauncherAM.OOZIE_LAUNCHER_QUEUE_PROPERTY,
+                    globalLauncherElement.getChild(LAUNCHER_QUEUE, ns).getText());
         }
 
-        LauncherConfig launcherConfig = new LauncherConfig(vcores, memory, env, javaOpts, queue, shareLibs);
-        return launcherConfig;
+        if (globalLauncherElement.getChild(LAUNCHER_SHARELIB, ns) != null) {
+            globalConf.set(LauncherAM.OOZIE_LAUNCHER_SHARELIB_PROPERTY,
+                    globalLauncherElement.getChild(LAUNCHER_SHARELIB, ns).getText());
+        }
     }
 }
